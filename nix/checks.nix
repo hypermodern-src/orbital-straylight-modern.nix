@@ -172,6 +172,72 @@ assert sealed;
       };
     };
 
+  # Vendor-blob content-addressing: admission = content hash (in-builder,
+  # independent of fetcher trust) + verify-closure (no dangling NEEDED).
+  # The PASS leg goes through lib.vendorBlob itself; the falsification legs
+  # (tampered bytes, dangling NEEDED) replicate the same admission commands
+  # in-check, since a nix check cannot depend on a failing derivation.
+  vendor-blob-admission =
+    let
+      lib' = import ./lib.nix;
+      # a well-formed synthetic vendor blob: one static-ish executable
+      goodBlob =
+        pkgs.runCommand "vendor-blob-good.tar" { nativeBuildInputs = [ pkgs.stdenv.cc pkgs.gnutar ]; } ''
+          mkdir -p tree/bin
+          echo 'int main(void){return 0;}' > h.c
+          cc -static -L${pkgs.glibc.static}/lib h.c -o tree/bin/tool
+          tar -cf $out -C tree .
+        '';
+      goodHash = pkgs.runCommand "vendor-blob-good.hash" { } ''
+        sha256sum ${goodBlob} | cut -d' ' -f1 | tr -d '\n' > $out
+      '';
+      admitted = lib'.vendorBlob {
+        inherit pkgs elf-suite;
+        name = "vendor-blob-admitted";
+        blob = goodBlob;
+        sha256 = builtins.readFile goodHash;
+        ignore = [ ];
+      };
+    in
+    pkgs.runCommand "vendor-blob-admission"
+      {
+        nativeBuildInputs = [
+          pkgs.stdenv.cc
+          pkgs.gnutar
+          elf-suite
+        ];
+        inherit goodBlob admitted;
+      }
+      ''
+        test -x $admitted/bin/tool && echo "ok: clean blob admitted via lib.vendorBlob"
+
+        # falsification 1: tampered blob — flip one byte, same admission command
+        cp $goodBlob tampered.tar && chmod +w tampered.tar
+        printf '\xff' | dd of=tampered.tar bs=1 seek=512 conv=notrunc status=none
+        want=$(sha256sum $goodBlob | cut -d' ' -f1)
+        if echo "$want  tampered.tar" | sha256sum -c - 2> /dev/null; then
+          echo "FAIL: tampered blob passed the content-address check"; exit 1
+        fi
+        echo "ok: tampered blob rejected by content address"
+
+        # falsification 2: a blob whose ELF has a dangling NEEDED
+        mkdir -p bad/lib bad/bin
+        echo 'int f(void){return 1;}' > f.c
+        cc -shared -fPIC -Wl,-soname,libghost.so.1 f.c -o libghost.so.1
+        echo 'extern int f(void); int main(void){return f();}' > m.c
+        cc m.c -L. -lghost -o bad/bin/needy \
+          -Wl,--no-as-needed -l:libghost.so.1 || cc m.c ./libghost.so.1 -o bad/bin/needy
+        if elf-verify --needed-closure --ignore libc.so.6 --ignore libgcc_s.so.1 bad; then
+          echo "FAIL: dangling NEEDED admitted"; exit 1
+        fi
+        echo "ok: dangling-NEEDED blob rejected by verify-closure"
+        cp libghost.so.1 bad/lib/
+        elf-verify --needed-closure --ignore libc.so.6 --ignore libgcc_s.so.1 bad \
+          && echo "ok: closed blob admitted"
+
+        echo "vendor-blob admission proofs complete" | tee $out
+      '';
+
   specimen-pkgsstatic-gzip =
     pkgs.runCommand "specimen-pkgsstatic-gzip"
       {

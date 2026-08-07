@@ -44,4 +44,90 @@
       ''
         runghc ${script} ${argsJson} "$out"
       '';
+
+  # ── vendor-blob content-addressing (the original modern.nix charter) ──────
+  #
+  # Vendor blobs (NVIDIA SDK tarballs, wheels, OCI-exported filesystems) are
+  # first-class content-addressed inputs: admission is (1) the blob's own
+  # content hash, checked IN the builder (independent of any fetcher's
+  # promise — a tampered blob is rejected before a byte is unpacked), and
+  # (2) verify-closure — every ELF's DT_NEEDED must resolve within the
+  # unpacked tree ∪ declared system floor ∪ the ignore list (MODE 2, dangling
+  # NEEDED), enforced by elf-verify. No ad-hoc fetch trust.
+  #
+  # vendorBlob ::
+  #   { pkgs, elf-suite, name, blob, sha256, unpack ? auto,
+  #     ignore ? [], gate ? true } -> derivation
+  vendorBlob =
+    {
+      pkgs,
+      elf-suite,
+      name,
+      blob, # a path (store or fetched) to the vendor archive
+      sha256, # the blob's content address, verified in-builder
+      unpack ? null, # shell fragment; default: tar -xf into $out
+      ignore ? [ ], # sonames provided by the host at runtime (libcuda.so.1 ...)
+      gate ? true,
+    }:
+    pkgs.runCommand name
+      {
+        nativeBuildInputs = [
+          pkgs.gnutar
+          pkgs.xz
+          pkgs.gzip
+          pkgs.zstd
+          elf-suite
+        ];
+        inherit blob sha256;
+      }
+      ''
+        # (1) content admission: the bytes must BE the declared identity
+        echo "$sha256  $blob" | sha256sum -c - || {
+          echo "vendorBlob: content-address mismatch — blob rejected" >&2
+          exit 1
+        }
+        mkdir -p $out
+        ${if unpack == null then ''tar -xf "$blob" -C $out'' else unpack}
+        # (2) structural admission: no dangling NEEDED (verify-closure MODE 2)
+        ${
+          if gate then
+            ''
+              elf-verify --needed-closure ${
+                pkgs.lib.concatMapStringsSep " " (i: "--ignore ${i}") ignore
+              } $out
+            ''
+          else
+            ""
+        }
+      '';
+
+  # container-to-nix — pull a vendor OCI image's filesystem as a
+  # fixed-output derivation (the charter's FOD extractor, absorbed from
+  # straylight-nvidia-sdk nix/modern.nix).
+  containerToNix =
+    {
+      pkgs,
+      name,
+      imageRef,
+      hash,
+    }:
+    let
+      platform = if pkgs.stdenv.hostPlatform.isAarch64 then "linux/arm64" else "linux/amd64";
+    in
+    pkgs.stdenvNoCC.mkDerivation {
+      inherit name;
+      nativeBuildInputs = [
+        pkgs.crane
+        pkgs.gnutar
+        pkgs.gzip
+      ];
+      outputHashAlgo = "sha256";
+      outputHashMode = "recursive";
+      outputHash = hash;
+      SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+      buildCommand = ''
+        mkdir -p $out
+        crane export --platform ${platform} ${imageRef} - | tar -xf - -C $out
+      '';
+    };
 }

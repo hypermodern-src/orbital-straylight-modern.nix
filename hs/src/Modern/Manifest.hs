@@ -33,11 +33,14 @@ data Manifest = Manifest
 
 data Op
   = -- | copy a whole source tree into the output (symlinks preserved,
-    -- exec bits preserved) — @cp -a src/. out/to@
-    OpCopy {opFrom :: Text, opTo :: FilePath}
+    -- exec bits preserved, hardlinks split) — @cp -r src\/. out\/to@;
+    -- @deref@ resolves symlinks to content (@cp -rL@, the §4.2 projection)
+    OpCopy {opFrom :: Text, opTo :: FilePath, opDeref :: Bool}
   | -- | copy ONE path (file, dir, or symlink) out of a source — the
     -- cudaMin\/pythonMin prune pattern, inverted: keep what you name.
-    OpCopyPath {opFrom :: Text, opPath :: FilePath, opTo :: FilePath, opOptional :: Bool}
+    -- @rename@ (optional) gives the copied entry a new name at the
+    -- destination (@cp src to\/rename@ instead of @cp src to\/@).
+    OpCopyPath {opFrom :: Text, opPath :: FilePath, opTo :: FilePath, opOptional :: Bool, opDeref :: Bool, opRename :: Maybe FilePath}
   | -- | delete tree entries matching root-relative globs (@*@ crosses @\/@)
     OpRemove {opGlobs :: [String]}
   | -- | run @strip@ (a manifest-declared tool, not a dependency) over paths
@@ -79,13 +82,15 @@ instance FromJSON Op where
   parseJSON = withObject "Op" $ \o -> do
     op <- o .: "op" :: Parser Text
     case op of
-      "copy" -> OpCopy <$> o .: "from" <*> o .:? "to" .!= "."
+      "copy" -> OpCopy <$> o .: "from" <*> o .:? "to" .!= "." <*> o .:? "deref" .!= False
       "copyPath" ->
         OpCopyPath
           <$> o .: "from"
           <*> o .: "path"
           <*> o .:? "to" .!= "."
           <*> o .:? "optional" .!= False
+          <*> o .:? "deref" .!= False
+          <*> o .:? "rename"
       "remove" -> OpRemove <$> o .: "globs"
       "strip" ->
         OpStrip

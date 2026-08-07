@@ -73,29 +73,31 @@ runProject suite m out = do
   -- is an independent blob, so the copy fidelity must match the digest's
   -- view (cp -a's --preserve=links would alias later per-path surgery
   -- across inodes: stripping bin/llvm-objcopy must not strip bin/llvm-strip).
-  cpA src dst = shelly . silently $ run_ "cp" ["-r", T.pack src, T.pack dst]
+  cpA deref src dst =
+    shelly . silently $ run_ "cp" [if deref then "-rL" else "-r", T.pack src, T.pack dst]
   makeWritable p = shelly . silently $ run_ "chmod" ["-R", "u+w", T.pack p]
 
-  step (OpCopy from to) = case source from of
+  step (OpCopy from to deref) = case source from of
     Left e -> pure (Left e)
     Right src -> do
       let dst = out </> to
       createDirectoryIfMissing True dst
-      cpA (src </> ".") dst
+      cpA deref (src </> ".") dst
       makeWritable dst
       pure (Right ())
-  step (OpCopyPath from path to opt) = case source from of
+  step (OpCopyPath from path to opt deref rename) = case source from of
     Left e -> pure (Left e)
     Right src -> do
-      let sp = src </> path
+      let sp = if null path then src else src </> path
       exists <- pathOrLinkExists sp
       if not exists
         then pure (if opt then Right () else Left (MissingPath sp))
         else do
-          let dst = out </> to
-          createDirectoryIfMissing True dst
-          cpA sp dst
-          makeWritable dst
+          let dstDir = out </> to
+          createDirectoryIfMissing True dstDir
+          let dst = maybe dstDir (dstDir </>) rename
+          cpA deref sp dst
+          makeWritable dstDir
           pure (Right ())
   step (OpRemove globs) = do
     entries <- walkRel out
