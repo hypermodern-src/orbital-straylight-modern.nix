@@ -49,6 +49,11 @@
       # mkTypedDerivation = the Shelly builder pattern (typed args, no bash).
       lib = import ./nix/lib.nix;
 
+      # The modern overlay (mk-runpath / patch-elf / verify-closure /
+      # extract / container-to-nix) — the vendor-blob charter, consumed by
+      # straylight-nvidia-sdk in place of its own copy.
+      overlays.default = import ./nix/overlay.nix;
+
       devShells = forAll (
         _system: pkgs: {
           default = pkgs.mkShell {

@@ -45,6 +45,38 @@
         runghc ${script} ${argsJson} "$out"
       '';
 
+  # ── project: the nix face of `modern project` ─────────────────────────────
+  #
+  # A derivation that interprets a projection manifest (a nix attrset,
+  # serialized to JSON — sources are store paths by construction) into a §12
+  # tree, gate enforced by the ELF suite. This is what replaces the ad-hoc
+  # `runCommand "<cell>-deshelled" '' ...bash... ''` stratum downstream.
+  #
+  # project ::
+  #   { pkgs, modern, name, manifest, allowedReferences ? [] | null } -> drv
+  project =
+    {
+      pkgs,
+      modern, # packages.modern (carries the ELF suite via its wrapper)
+      name,
+      manifest, # attrset: { name, sources, ops, gate? }
+      allowedReferences ? [ ],
+    }:
+    let
+      manifestFile = pkgs.writeText "${name}-manifest.json" (builtins.toJSON manifest);
+    in
+    pkgs.runCommand name
+      (
+        {
+          nativeBuildInputs = [ modern ];
+          passthru = { inherit manifestFile; };
+        }
+        // (if allowedReferences == null then { } else { inherit allowedReferences; })
+      )
+      ''
+        modern project ${manifestFile} --out "$out"
+      '';
+
   # ── vendor-blob content-addressing (the original modern.nix charter) ──────
   #
   # Vendor blobs (NVIDIA SDK tarballs, wheels, OCI-exported filesystems) are
