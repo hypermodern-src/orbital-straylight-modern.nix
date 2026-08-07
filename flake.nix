@@ -29,6 +29,11 @@
           # The C++23 ELF suite: elf-verify / elf-census / elf-graft.
           # Built with the plain nixpkgs stdenv compiler (gcc).
           elf-suite = pkgs.callPackage ./nix/elf-suite.nix { };
+          # The static-musl build (pkgsStatic): genuinely static ELFs — no
+          # PT_INTERP, no DT_NEEDED — so a DOWNSTREAM repo can project the
+          # suite as a standalone cell (the re-export; modern.nix itself
+          # never learns cells exist). Still nixpkgs-only.
+          elf-suite-static = pkgs.pkgsStatic.callPackage ./nix/elf-suite.nix { };
           # The Haskell `modern` CLI (`modern project`): typed projection —
           # manifest in, §12 tree out, gate enforced by the ELF suite.
           modern = pkgs.callPackage ./nix/modern-cli.nix { inherit elf-suite; };
