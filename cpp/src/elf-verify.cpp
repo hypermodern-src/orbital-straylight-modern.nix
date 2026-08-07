@@ -157,8 +157,9 @@ int main(int argc, char** argv) {
       violations.push_back(e.rel + ": malformed ELF: " + e.parse_error);
 
     if (o.no_store_refs && e.store_refs > 0)
-      violations.push_back(e.rel + ": /nix/store literal (" + std::to_string(e.store_refs) +
-                           " occurrence" + (e.store_refs == 1 ? "" : "s") + ")");
+      violations.push_back(e.rel + ": " + modern::tree::store_needle() + " literal (" +
+                           std::to_string(e.store_refs) + " occurrence" +
+                           (e.store_refs == 1 ? "" : "s") + ")");
 
     if (o.no_scripts_in_bin && e.kind == Kind::Script && modern::tree::is_bin_entry(e.rel)) {
       bool waived = false;

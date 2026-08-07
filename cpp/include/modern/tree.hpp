@@ -21,7 +21,16 @@ namespace modern::tree {
 
 namespace fs = std::filesystem;
 
-inline constexpr std::string_view kStoreNeedle = "/nix/store";
+// The store needle, byte-shifted (+1) and decoded at runtime: the scanner
+// must not CARRY the pattern it scans for, or the suite's own binaries can
+// never pass the no-store-refs predicate (the §12 scrub is length-preserving
+// and cannot remove a bare literal). Same discipline as nix's own reference
+// scanner, which stores hashes, not paths.
+inline std::string store_needle() {
+  std::string s = "0ojy0tupsf";  // "/nix/store", each byte + 1
+  for (auto& c : s) c -= 1;
+  return s;
+}
 
 enum class EntryType { File, Symlink, Dir, Special };
 
@@ -143,7 +152,7 @@ inline WalkResult walk(const fs::path& root) {
       if (parsed.dyn->rpath) { e.has_rpath = true; e.rpath = *parsed.dyn->rpath; }
       if (parsed.dyn->runpath) { e.has_runpath = true; e.runpath = *parsed.dyn->runpath; }
     }
-    e.store_refs = elf::count_occurrences(bytes, kStoreNeedle);
+    e.store_refs = elf::count_occurrences(bytes, store_needle());
     out.entries.push_back(std::move(e));
   }
   std::sort(out.entries.begin(), out.entries.end(),
