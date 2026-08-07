@@ -38,3 +38,23 @@ every predicate is shown to **fail** on a broken specimen before its pass
 counts, with readelf/patchelf as differential oracles (oracles only — never
 dependencies). `checks.specimen-pkgsstatic-gzip` checks the suite against
 the real historical specimen on the current pin.
+
+## `modern project` (Haskell, `packages.modern`)
+
+Typed projection: a JSON manifest (sources, copy/prune, strip, de-shell
+symlinks, settings rewrites, the length-preserving Gate-F scrub) in, a §12
+tree out, the gate enforced by calling the ELF suite. A poisoned manifest —
+a smuggled store ref, a wrapper script under `bin/` — fails with a typed
+error naming the file. Built from nixpkgs GHC + Shelly/aeson only; source
+paths are injected by the caller (downstream repos own their cell manifests,
+so no straylight path ever appears here).
+
+Proven: the canonical `cxx-clang22-libstdcxx-musl` cell projected through
+`modern project` reproduces its locked BLAKE3 REAPI root digest
+(`9bad8764…:319`) bit-for-bit.
+
+## `lib.mkTypedDerivation`
+
+The Shelly builder pattern: `buildCommand = runghc <script> <args.json> $out`
+— arguments are data (aeson), process work is Shelly, nothing is spliced
+into a bash string. `checks.typed-derivation-demo` is the working model.

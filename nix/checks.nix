@@ -17,6 +17,7 @@
   pkgs,
   self,
   elf-suite,
+  modern,
 }:
 let
   lock = builtins.fromJSON (builtins.readFile (self + "/flake.lock"));
@@ -61,6 +62,115 @@ assert sealed;
         CC=cc READELF=readelf PATCHELF=patchelf \
           bash ${../cpp/test/run-tests.sh} | tee $out
       '';
+
+  # `modern project` end-to-end over a synthetic cell: copy + strip + symlink
+  # + scrub + gate, then the falsifications — a poisoned source (store ref,
+  # wrapper script) must fail the gate with a typed error NAMING the file.
+  modern-project-tests =
+    pkgs.runCommand "modern-project-tests"
+      {
+        nativeBuildInputs = [
+          pkgs.stdenv.cc
+          pkgs.jq
+          modern
+        ];
+      }
+      ''
+        mkdir work && cd work
+
+        # a synthetic source cell: one static-ish binary + a data file
+        mkdir -p src/bin src/share
+        cat > hello.c <<'EOF'
+        #include <stdio.h>
+        int main(void){ puts("cell"); return 0; }
+        EOF
+        cc -static -L${pkgs.glibc.static}/lib hello.c -o src/bin/hello
+        echo "docs" > src/share/README
+
+        write_manifest() { # $1 = source dir, $2 = out json
+          cat > "$2" <<EOF
+        {
+          "name": "synthetic",
+          "sources": { "tree": "$PWD/$1" },
+          "ops": [
+            { "op": "copy", "from": "tree" },
+            { "op": "strip", "tool": "$(command -v strip)", "paths": ["bin/hello"], "optional": true },
+            { "op": "symlink", "at": "bin/h", "target": "hello", "ifMissing": true },
+            { "op": "scrub" }
+          ],
+          "gate": { "policy": "static" }
+        }
+        EOF
+        }
+
+        write_manifest src m.json
+        modern project m.json --out out1
+        test -x out1/bin/hello && test -L out1/bin/h || { echo "FAIL: projected shape"; exit 1; }
+
+        # determinism: same manifest, same bytes
+        modern project m.json --out out2
+        diff -r out1 out2 && echo "ok: projection deterministic"
+
+        # falsification 1: a wrapper script wearing an ELF name
+        cp -r src poisoned1 && chmod -R u+w poisoned1
+        printf '#!/bin/sh\nexec hello\n' > poisoned1/bin/gzip
+        chmod +x poisoned1/bin/gzip
+        write_manifest poisoned1 m1.json
+        if modern project m1.json --out bad1 2> err1.txt; then
+          echo "FAIL: wrapper script passed the gate"; exit 1
+        fi
+        grep -q 'gate violation: bin/gzip' err1.txt || { echo "FAIL: error does not name the file"; cat err1.txt; exit 1; }
+        grep -q '"file":"bin/gzip"' err1.txt || { echo "FAIL: no typed (JSON) error"; cat err1.txt; exit 1; }
+        echo "ok: falsify wrapper-script names bin/gzip (typed)"
+
+        # falsification 2: a smuggled /nix/store reference that scrub cannot
+        # kill length-preservingly is still caught by the gate — plant it
+        # AFTER scrub would run by skipping the scrub op
+        cp -r src poisoned2 && chmod -R u+w poisoned2
+        echo "ref: /nix/store/abcdefghijklmnopqrstuvwxyz012345-leak" > poisoned2/share/leak.txt
+        cat > m2.json <<EOF
+        {
+          "name": "synthetic",
+          "sources": { "tree": "$PWD/poisoned2" },
+          "ops": [ { "op": "copy", "from": "tree" } ],
+          "gate": { "policy": "static" }
+        }
+        EOF
+        if modern project m2.json --out bad2 2> err2.txt; then
+          echo "FAIL: store ref passed the gate"; exit 1
+        fi
+        grep -q 'gate violation: share/leak.txt' err2.txt || { echo "FAIL: error does not name the file"; cat err2.txt; exit 1; }
+        echo "ok: falsify store-ref names share/leak.txt (typed)"
+
+        # the scrub op DOES kill a hashed store literal (length-preserving)
+        modern project m.json --out out3
+        cmp -s out1/bin/hello out3/bin/hello && echo "ok: scrubbed binary stable"
+
+        echo "all modern-project tests passed" | tee $out
+      '';
+
+  # The mkTypedDerivation pattern end-to-end: buildCommand = runghc Build.hs
+  # with typed JSON args, Shelly for process work, the ELF suite as the gate.
+  typed-derivation-demo =
+    let
+      lib' = import ./lib.nix;
+      helloStatic =
+        pkgs.runCommand "hello-static-specimen" { nativeBuildInputs = [ pkgs.stdenv.cc ]; } ''
+          echo 'int main(void){return 0;}' > h.c
+          cc -static -L${pkgs.glibc.static}/lib h.c -o $out
+        '';
+    in
+    lib'.mkTypedDerivation {
+      inherit pkgs;
+      name = "typed-derivation-demo";
+      script = ./typed-demo/Build.hs;
+      runtimeInputs = [ pkgs.coreutils ];
+      args = {
+        binary = helloStatic;
+        elfSuite = elf-suite;
+        motd = "projected by a typed Shelly builder, no string-spliced bash";
+      };
+    };
 
   specimen-pkgsstatic-gzip =
     pkgs.runCommand "specimen-pkgsstatic-gzip"

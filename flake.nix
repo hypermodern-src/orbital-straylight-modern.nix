@@ -29,6 +29,9 @@
           # The C++23 ELF suite: elf-verify / elf-census / elf-graft.
           # Built with the plain nixpkgs stdenv compiler (gcc).
           elf-suite = pkgs.callPackage ./nix/elf-suite.nix { };
+          # The Haskell `modern` CLI (`modern project`): typed projection —
+          # manifest in, §12 tree out, gate enforced by the ELF suite.
+          modern = pkgs.callPackage ./nix/modern-cli.nix { inherit elf-suite; };
           default = elf-suite;
         }
       );
@@ -38,8 +41,13 @@
         import ./nix/checks.nix {
           inherit pkgs self;
           elf-suite = self.packages.${system}.elf-suite;
+          modern = self.packages.${system}.modern;
         }
       );
+
+      # System-independent library surface: every function takes pkgs.
+      # mkTypedDerivation = the Shelly builder pattern (typed args, no bash).
+      lib = import ./nix/lib.nix;
 
       devShells = forAll (
         _system: pkgs: {
