@@ -3,3 +3,4 @@ result-*
 cpp/elf-verify
 cpp/elf-census
 cpp/elf-graft
+doc/buck-out/

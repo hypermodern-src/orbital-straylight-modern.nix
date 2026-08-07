@@ -1,0 +1,10 @@
+[book]
+title = "modern.nix: The Bootstrap Book"
+authors = ["Straylight"]
+language = "en"
+src = "src"
+description = "The dependency-free bootstrap layer: the C++23 ELF suite, typed projection, vendor-blob content-addressing, and the seal that keeps the recursion from re-forming."
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"

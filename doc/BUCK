@@ -1,0 +1,16 @@
+# The spoke book builds as a buck2 target, same pattern as the central book
+# (see the hub's "The books" page): `nix_build` over this doc/ project's own
+# flake `book` output. The filegroup makes chapter edits invalidate the fetch
+# (nix_build's action digest is its lock deps' content).
+filegroup(
+    name = "flake_files",
+    srcs = ["flake.nix", "flake.lock", "book.toml"] + glob(["src/**/*.md"]),
+    visibility = ["PUBLIC"],
+)
+
+nix_build(
+    name = "book",
+    flake_uri = "path:.",
+    attr = "book",
+    lock = [":flake_files"],
+)

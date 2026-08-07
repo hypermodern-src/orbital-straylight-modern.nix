@@ -1,0 +1,12 @@
+[cells]
+root = .
+prelude = prelude
+
+[external_cells]
+prelude = straylight
+
+[buildfile]
+name = BUCK
+
+[buck2]
+digest_algorithms = BLAKE3
