@@ -55,7 +55,9 @@ adds sizes for the strict form.
 `elf-resolve` is the non-mutating dynamic-loader planner for imported rootfs
 trees. It begins from declared executable paths, directory surfaces, or globbed
 plugin/extension roots and records every reachable `DT_NEEDED` edge together
-with the provider selected by the consumer's actual loader context.
+with the provider selected by the consumer's actual loader context. Each edge
+carries a deterministic context identity because the same ELF can be reached
+more than once with different inherited RPATH state.
 
 The modeled precedence is `DT_RPATH` (when no `DT_RUNPATH`) → inherited RPATH →
 declared library path → `DT_RUNPATH` → an explicit normalized `ld.so.cache`

@@ -29,6 +29,7 @@ struct Edge {
   std::string needed;
   std::string provider;
   std::string source;
+  std::string context;
 };
 
 auto field(const std::string& token, const std::string& key, std::string& out) -> bool {
@@ -49,12 +50,14 @@ auto safe_relative(const std::string& raw) -> bool {
 
 auto parse_edge(const std::string& line, Edge& edge) -> bool {
   std::istringstream input(line);
-  std::string tag, root, consumer, needed, provider, source, residue;
-  if (!(input >> tag >> root >> consumer >> needed >> provider >> source) || input >> residue)
+  std::string tag, root, consumer, needed, provider, source, context, residue;
+  if (!(input >> tag >> root >> consumer >> needed >> provider >> source >> context) ||
+      input >> residue)
     return false;
   return tag == "EDGE" && field(root, "root", edge.root) &&
          field(consumer, "consumer", edge.consumer) && field(needed, "needed", edge.needed) &&
-         field(provider, "provider", edge.provider) && field(source, "source", edge.source);
+         field(provider, "provider", edge.provider) && field(source, "source", edge.source) &&
+         field(context, "context", edge.context);
 }
 
 auto read_elf(const fs::path& path) -> std::optional<modern::elf::Parsed> {
@@ -96,10 +99,11 @@ int main(int argc, char** argv) {
     edges.push_back(std::move(edge));
   }
 
-  using Context = std::pair<std::string, std::string>;
+  using Context = std::tuple<std::string, std::string, std::string>;
   std::map<Context, std::multiset<std::string>> planned;
   std::map<Context, std::multiset<std::string>> actual;
-  std::set<Context> providers;
+  using Provider = std::pair<std::string, std::string>;
+  std::set<Provider> providers;
   std::map<std::string, modern::elf::Parsed> parsed;
 
   auto load = [&](const std::string& rel) -> std::optional<modern::elf::Parsed> {
@@ -127,7 +131,8 @@ int main(int argc, char** argv) {
 
   for (const auto& edge : edges) {
     if (!safe_relative(edge.root) || !safe_relative(edge.consumer) || edge.needed.empty() ||
-        edge.needed.find('/') != std::string::npos || !sources.contains(edge.source)) {
+        edge.needed.find('/') != std::string::npos || edge.context.empty() ||
+        !sources.contains(edge.source)) {
       std::cerr << "INVALID_EDGE consumer=" << edge.consumer << " needed=" << edge.needed << '\n';
       failed = true;
       continue;
@@ -142,7 +147,7 @@ int main(int argc, char** argv) {
       failed = true;
       continue;
     }
-    const Context context{edge.root, edge.consumer};
+    const Context context{edge.root, edge.consumer, edge.context};
     planned[context].insert(edge.needed);
     if (!actual.contains(context))
       actual[context].insert(consumer->dyn->needed.begin(), consumer->dyn->needed.end());
@@ -165,13 +170,19 @@ int main(int argc, char** argv) {
 
   for (const auto& [context, needs] : actual) {
     if (planned[context] != needs) {
-      std::cerr << "COVERAGE root=" << context.first << " consumer=" << context.second << '\n';
+      std::cerr << "COVERAGE root=" << std::get<0>(context)
+                << " consumer=" << std::get<1>(context)
+                << " context=" << std::get<2>(context) << '\n';
       failed = true;
     }
   }
   for (const auto& context : providers) {
     const auto provider = load(context.second);
-    if (provider && provider->dyn && !provider->dyn->needed.empty() && !actual.contains(context)) {
+    bool covered = false;
+    for (const auto& [candidate, _] : actual)
+      if (std::get<0>(candidate) == context.first && std::get<1>(candidate) == context.second)
+        covered = true;
+    if (provider && provider->dyn && !provider->dyn->needed.empty() && !covered) {
       std::cerr << "UNCLOSED root=" << context.first << " provider=" << context.second << '\n';
       failed = true;
     }

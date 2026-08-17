@@ -46,7 +46,22 @@ struct Edge {
   std::string needed;
   std::string provider;
   std::string source;
+  std::string context;
 };
+
+auto context_id(const std::vector<std::string>& inherited_rpath) -> std::string {
+  if (inherited_rpath.empty()) return "-";
+  static constexpr char hex[] = "0123456789abcdef";
+  std::string out;
+  for (const auto& path : inherited_rpath) {
+    if (!out.empty()) out += ',';
+    for (const unsigned char byte : path) {
+      out += hex[byte >> 4];
+      out += hex[byte & 0x0f];
+    }
+  }
+  return out;
+}
 
 auto split_colon(const std::string& value) -> std::vector<std::string> {
   std::vector<std::string> out;
@@ -145,7 +160,7 @@ auto resolve(const Options& o, const fs::path& consumer, const modern::tree::Ent
     if (!p) return std::nullopt;
     auto selected = canonical_inside(o.root, *p);
     if (!selected) return std::nullopt;
-    return Edge{"", entry.rel, needed, rel(o.root, *selected), "needed-path"};
+    return Edge{"", entry.rel, needed, rel(o.root, *selected), "needed-path", ""};
   }
 
   std::vector<std::pair<std::string, std::string>> search;
@@ -162,20 +177,20 @@ auto resolve(const Options& o, const fs::path& consumer, const modern::tree::Ent
     auto d = root_path(o.root, origin, directory);
     if (!d) continue;
     auto selected = canonical_inside(o.root, *d / needed);
-    if (selected) return Edge{"", entry.rel, needed, rel(o.root, *selected), source};
+    if (selected) return Edge{"", entry.rel, needed, rel(o.root, *selected), source, ""};
   }
   if (auto it = o.cache.find(needed); it != o.cache.end()) {
     auto p = root_path(o.root, origin, it->second);
     if (!p) return std::nullopt;
     auto selected = canonical_inside(o.root, *p);
     if (!selected) return std::nullopt;
-    return Edge{"", entry.rel, needed, rel(o.root, *selected), "cache"};
+    return Edge{"", entry.rel, needed, rel(o.root, *selected), "cache", ""};
   }
   for (const auto& directory : o.defaults) {
     auto d = root_path(o.root, origin, directory);
     if (!d) continue;
     auto selected = canonical_inside(o.root, *d / needed);
-    if (selected) return Edge{"", entry.rel, needed, rel(o.root, *selected), "default"};
+    if (selected) return Edge{"", entry.rel, needed, rel(o.root, *selected), "default", ""};
   }
   return std::nullopt;
 }
@@ -324,7 +339,8 @@ int main(int argc, char** argv) {
     const auto consumer = o.root / entry.rel;
     for (const auto& needed : entry.needed) {
       if (o.host.contains(needed)) {
-        edges.push_back({work.root, entry.rel, needed, "@host", "host"});
+        edges.push_back({work.root, entry.rel, needed, "@host", "host",
+                         context_id(work.inherited_rpath)});
         continue;
       }
       auto edge = resolve(o, consumer, entry, work.inherited_rpath, needed);
@@ -334,6 +350,7 @@ int main(int argc, char** argv) {
         failed = true;
       } else {
         edge->root = work.root;
+        edge->context = context_id(work.inherited_rpath);
         if (edge->provider != "@host") {
           auto inherited = work.inherited_rpath;
           if (!entry.has_runpath && entry.has_rpath) {
@@ -352,9 +369,12 @@ int main(int argc, char** argv) {
       }
     }
   }
-  std::ranges::sort(edges, {}, [](const Edge& e) { return std::tie(e.root, e.consumer, e.needed); });
+  std::ranges::sort(edges, {}, [](const Edge& e) {
+    return std::tie(e.root, e.consumer, e.context, e.needed, e.provider, e.source);
+  });
   for (const auto& e : edges)
     std::cout << "EDGE root=" << e.root << " consumer=" << e.consumer << " needed=" << e.needed
-              << " provider=" << e.provider << " source=" << e.source << '\n';
+              << " provider=" << e.provider << " source=" << e.source
+              << " context=" << e.context << '\n';
   return failed ? 1 : 0;
 }
