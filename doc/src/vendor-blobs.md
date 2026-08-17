@@ -24,7 +24,9 @@ For OCI rootfs imports, admission additionally uses `elf-resolve`: products
 declare their executable and plugin/extension roots, the image's loader cache is
 normalized into inert SONAME→path data, and the complete reachable edge plan
 must resolve. Dead payload is outside the product closure; a hand-maintained
-"optional missing library" list is not a substitute for reachability.
+"optional missing library" list is not a substitute for reachability. The
+separate `elf-replay` tool then checks the plan against the rootfs without
+reusing resolver policy, so a resolver mistake cannot certify its own output.
 
 ## The overlay
 

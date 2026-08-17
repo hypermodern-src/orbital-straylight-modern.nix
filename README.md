@@ -30,6 +30,12 @@ compiler (gcc).
   line per entry (kind, interp, NEEDED, soname, rpath, store-ref count).
   Census equivalence is the differential leg for cells whose compiler builds
   are not bit-reproducible.
+- **`elf-resolve`** — deterministic, non-mutating loader resolution for an
+  imported rootfs. It preserves each consumer's RPATH/RUNPATH context and
+  emits the complete reachable edge plan.
+- **`elf-replay`** — an independent verifier for that plan. It re-reads the
+  rootfs and proves exact `DT_NEEDED` coverage and honest provider boundaries
+  without performing resolution itself.
 
 ## Tests
 

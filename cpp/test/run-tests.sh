@@ -193,6 +193,37 @@ $RESOLVE resolve --host libc.so.6 > resolve.plan
 grep -q 'consumer=bin/use-foo needed=libfoo.so.1 provider=good/libfoo.so.1 source=runpath' resolve.plan \
   && ok "resolve: consumer RUNPATH selects ABI-matched provider" \
   || bad "resolve: wrong duplicate-SONAME provider selected"
+$REPLAY resolve resolve.plan \
+  && ok "replay: independently validates complete plan" \
+  || bad "replay: valid resolver plan rejected"
+: > replay-empty.plan
+expect_exit 1 "falsify: replay rejects empty self-attestation" \
+  $REPLAY resolve replay-empty.plan
+printf 'not an edge\n' > replay-malformed.plan
+expect_exit 1 "falsify: replay rejects malformed plan" \
+  $REPLAY resolve replay-malformed.plan
+sed 's/needed=libfoo.so.1/needed=libwrong.so.1/' resolve.plan > replay-wrong-needed.plan
+expect_exit 1 "falsify: replay rejects invented DT_NEEDED" \
+  $REPLAY resolve replay-wrong-needed.plan
+grep -v 'needed=libfoo.so.1' resolve.plan > replay-missing-edge.plan
+expect_exit 1 "falsify: replay rejects incomplete edge coverage" \
+  $REPLAY resolve replay-missing-edge.plan
+printf 'not elf\n' > resolve/data-provider
+sed 's#provider=good/libfoo.so.1#provider=data-provider#' resolve.plan > replay-data-provider.plan
+expect_exit 1 "falsify: replay rejects non-ELF provider" \
+  $REPLAY resolve replay-data-provider.plan
+sed 's#provider=good/libfoo.so.1#provider=../escape#' resolve.plan > replay-escape.plan
+expect_exit 1 "falsify: replay rejects root escape" \
+  $REPLAY resolve replay-escape.plan
+mv resolve/good/libfoo.so.1 resolve/good/libfoo.inside
+ln -s ../../corpus/libfoo.so.1 resolve/good/libfoo.so.1
+expect_exit 1 "falsify: replay rejects provider symlink escaping root" \
+  $REPLAY resolve resolve.plan
+rm resolve/good/libfoo.so.1
+mv resolve/good/libfoo.inside resolve/good/libfoo.so.1
+sed 's/source=runpath/source=host/' resolve.plan > replay-host-source.plan
+expect_exit 1 "falsify: replay rejects forged host boundary" \
+  $REPLAY resolve replay-host-source.plan
 
 # A loader-cache decision is explicit data. RUNPATH precedes it; without a
 # RUNPATH the exact cached provider is selected (never rediscovered by find).

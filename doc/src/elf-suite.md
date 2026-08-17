@@ -1,6 +1,6 @@
 # The ELF suite
 
-Four C++23 tools over one mmap'd ELF64 reader/writer
+Five C++23 tools over one mmap'd ELF64 reader/writer
 (`cpp/include/modern/elf.hpp`) — no libbfd, no libelf, no vendored parser.
 Built with the plain nixpkgs stdenv compiler (gcc).
 
@@ -73,6 +73,21 @@ surface (565 extension modules) resolves 11,775 edges with zero unresolved:
 10,156 cache, 1,251 RUNPATH, 190 RPATH, 163 inherited-RPATH, 11 host, and four
 declared library-path edges. This plan replaces flatten-and-`autoPatchelf`:
 vendor loader topology is preserved and independently replayable.
+
+## elf-replay
+
+`elf-replay ROOT PLAN` is the independent acceptance side of the resolver
+contract. It does not search for libraries or share resolution policy with
+`elf-resolve`; it parses the emitted claims, re-opens every consumer and
+provider, and checks that each root/consumer context has the exact multiset of
+`DT_NEEDED` edges present in the ELF. Providers must be root-confined ELF
+files, host edges must have no provider, source labels must be known, and every
+non-leaf provider must itself appear as a consumer context.
+
+This separation makes the plan falsifiable rather than self-attesting. The
+ledger rejects malformed records, invented or omitted dependencies, non-ELF
+providers, root escapes, and forged host boundaries before accepting a real
+resolver plan.
 
 ## The scanner must not carry its needle
 

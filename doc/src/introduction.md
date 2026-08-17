@@ -9,7 +9,8 @@ The constraint is not a style preference; it is what prevents the bootstrap
 recursion from re-forming. modern.nix hosts its **own** tools, built from
 plain nixpkgs stdenv and GHC:
 
-- the **C++23 ELF suite** — `elf-verify`, `elf-graft`, `elf-census`
+- the **C++23 ELF suite** — `elf-verify`, `elf-graft`, `elf-census`,
+  `elf-resolve`, `elf-replay`
   ([The ELF suite](elf-suite.md));
 - the **`modern` CLI** — `modern project`, the typed projection interpreter,
   plus `lib.mkTypedDerivation`, the Shelly builder pattern

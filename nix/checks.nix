@@ -60,6 +60,7 @@ assert sealed;
         CENSUS=${elf-suite}/bin/elf-census \
         GRAFT=${elf-suite}/bin/elf-graft \
         RESOLVE=${elf-suite}/bin/elf-resolve \
+        REPLAY=${elf-suite}/bin/elf-replay \
         CC=cc READELF=readelf PATCHELF=patchelf \
           bash ${../cpp/test/run-tests.sh} | tee $out
       '';

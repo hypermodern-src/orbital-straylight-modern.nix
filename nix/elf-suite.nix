@@ -18,7 +18,7 @@ stdenv.mkDerivation {
   enableParallelBuilding = true;
 
   meta = {
-    description = "elf-verify / elf-census / elf-graft / elf-resolve — the modern.nix ELF suite";
+    description = "elf-verify / elf-census / elf-graft / elf-resolve / elf-replay — the modern.nix ELF suite";
     mainProgram = "elf-verify";
   };
 }
