@@ -5,7 +5,7 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++23 -O2 -Wall -Wextra -Werror -Iinclude
 PREFIX ?= /usr/local
 
-TOOLS := elf-verify elf-census elf-graft
+TOOLS := elf-verify elf-census elf-graft elf-resolve
 HDRS := include/modern/elf.hpp include/modern/tree.hpp
 
 all: $(TOOLS)

@@ -1,6 +1,6 @@
 # The ELF suite
 
-Three C++23 tools over one mmap'd ELF64 reader/writer
+Four C++23 tools over one mmap'd ELF64 reader/writer
 (`cpp/include/modern/elf.hpp`) — no libbfd, no libelf, no vendored parser.
 Built with the plain nixpkgs stdenv compiler (gcc).
 
@@ -49,6 +49,30 @@ kind, exec bit, interp, `DT_NEEDED`, soname, rpath/runpath, store-ref
 count. Census equivalence (byte-identical outputs) is the differential leg
 for trees whose producing compilers are not bit-reproducible; `--sizes`
 adds sizes for the strict form.
+
+## elf-resolve
+
+`elf-resolve` is the non-mutating dynamic-loader planner for imported rootfs
+trees. It begins from declared executable paths, directory surfaces, or globbed
+plugin/extension roots and records every reachable `DT_NEEDED` edge together
+with the provider selected by the consumer's actual loader context.
+
+The modeled precedence is `DT_RPATH` (when no `DT_RUNPATH`) → inherited RPATH →
+declared library path → `DT_RUNPATH` → an explicit normalized `ld.so.cache`
+plan → declared default directories. `$ORIGIN` is expanded against the ELF that
+declared it; inherited RPATH carries that already-expanded directory into child
+resolution. Absolute symlinks are interpreted inside the imported rootfs, never
+against the build host. Host-provided SONAMEs such as `libcuda.so.1` must be
+declared individually.
+
+The falsification ledger includes duplicate incompatible SONAME providers,
+traversal-order changes, malformed cache plans, root-escaping symlinks,
+unreachable broken plugins, missing entrypoints, and inherited `$ORIGIN`.
+Against the CUDA 13.1 / Triton 26.06 TRT-LLM image, the declared Triton + Python
+surface (565 extension modules) resolves 11,775 edges with zero unresolved:
+10,156 cache, 1,251 RUNPATH, 190 RPATH, 163 inherited-RPATH, 11 host, and four
+declared library-path edges. This plan replaces flatten-and-`autoPatchelf`:
+vendor loader topology is preserved and independently replayable.
 
 ## The scanner must not carry its needle
 

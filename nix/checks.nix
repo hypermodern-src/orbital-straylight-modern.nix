@@ -59,6 +59,7 @@ assert sealed;
         VERIFY=${elf-suite}/bin/elf-verify \
         CENSUS=${elf-suite}/bin/elf-census \
         GRAFT=${elf-suite}/bin/elf-graft \
+        RESOLVE=${elf-suite}/bin/elf-resolve \
         CC=cc READELF=readelf PATCHELF=patchelf \
           bash ${../cpp/test/run-tests.sh} | tee $out
       '';

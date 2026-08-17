@@ -6,11 +6,11 @@
 # oracles are readelf and patchelf — used only to CHECK the suite, never as
 # dependencies of it.
 #
-# Environment: VERIFY CENSUS GRAFT (tool paths), CC (a working C compiler),
+# Environment: VERIFY CENSUS GRAFT RESOLVE (tool paths), CC (a working C compiler),
 # READELF, PATCHELF. Run from a writable scratch directory.
 set -ueo pipefail
 
-: "${VERIFY:?}" "${CENSUS:?}" "${GRAFT:?}" "${CC:?}" "${READELF:?}" "${PATCHELF:?}"
+: "${VERIFY:?}" "${CENSUS:?}" "${GRAFT:?}" "${RESOLVE:?}" "${CC:?}" "${READELF:?}" "${PATCHELF:?}"
 
 pass=0
 fail=0
@@ -176,6 +176,98 @@ else
 fi
 expect_exit 1 "falsify: --ignore withdrawn reintroduces the libc dangle" \
   $VERIFY --needed-closure spec-nc
+
+# ── elf-resolve: preserve each consumer's loader context ───────────────────
+# Historical NGC failure: two ABI-incompatible providers shared a SONAME and
+# flatten+cp-an selected one by find order. The plan must instead follow the
+# consumer's own $ORIGIN RUNPATH.
+mkdir -p resolve/bin resolve/good resolve/bad
+printf 'int foo(void) { return 7; }\n' > foo-good.c
+printf 'int foo(void) { return 99; }\n' > foo-bad.c
+printf 'extern int foo(void); int main(void) { return foo() == 7 ? 0 : 1; }\n' > use-foo.c
+$CC -shared -fPIC -Wl,-soname,libfoo.so.1 foo-good.c -o resolve/good/libfoo.so.1
+$CC -shared -fPIC -Wl,-soname,libfoo.so.1 foo-bad.c -o resolve/bad/libfoo.so.1
+$CC use-foo.c -Lresolve/good -Wl,-rpath,'$ORIGIN/../good' \
+  -Wl,--no-as-needed -l:libfoo.so.1 -o resolve/bin/use-foo
+$RESOLVE resolve --host libc.so.6 > resolve.plan
+grep -q 'consumer=bin/use-foo needed=libfoo.so.1 provider=good/libfoo.so.1 source=runpath' resolve.plan \
+  && ok "resolve: consumer RUNPATH selects ABI-matched provider" \
+  || bad "resolve: wrong duplicate-SONAME provider selected"
+
+# A loader-cache decision is explicit data. RUNPATH precedes it; without a
+# RUNPATH the exact cached provider is selected (never rediscovered by find).
+printf 'libfoo.so.1 /bad/libfoo.so.1\n' > resolve.cache
+$RESOLVE resolve --host libc.so.6 --cache-plan resolve.cache > resolve.cache-plan
+grep -q 'consumer=bin/use-foo needed=libfoo.so.1 provider=good/libfoo.so.1 source=runpath' resolve.cache-plan \
+  && ok "resolve: RUNPATH precedes loader cache" \
+  || bad "resolve: cache incorrectly overrode RUNPATH"
+$CC use-foo.c -Lresolve/bad -Wl,--no-as-needed -l:libfoo.so.1 -o resolve/bin/use-cache
+$RESOLVE resolve --host libc.so.6 --cache-plan resolve.cache > resolve.cache-plan.2
+grep -q 'consumer=bin/use-cache needed=libfoo.so.1 provider=bad/libfoo.so.1 source=cache' resolve.cache-plan.2 \
+  && ok "resolve: explicit loader-cache provider selected" \
+  || bad "resolve: cache provider not selected"
+mkdir resolve/absolute
+ln -s /good/libfoo.so.1 resolve/absolute/libfoo.so.1
+printf 'libfoo.so.1 /absolute/libfoo.so.1\n' > resolve.absolute.cache
+$RESOLVE resolve --host libc.so.6 --cache-plan resolve.absolute.cache --entry /bin/use-cache > resolve.absolute.plan
+grep -q 'provider=good/libfoo.so.1 source=cache' resolve.absolute.plan \
+  && ok "resolve: absolute container symlink is root-relative" \
+  || bad "resolve: absolute container symlink escaped to host"
+printf 'not-a-valid-cache-row\n' > malformed.cache
+expect_exit 2 "falsify: malformed cache plan rejected" \
+  $RESOLVE resolve --cache-plan malformed.cache
+rm resolve/bin/use-cache
+
+before=$(sha256sum resolve.plan | cut -d' ' -f1)
+touch resolve/bad/created-later
+$RESOLVE resolve --host libc.so.6 > resolve.plan.2
+after=$(sha256sum resolve.plan.2 | cut -d' ' -f1)
+[ "$before" = "$after" ] && ok "resolve: plan independent of traversal order" \
+  || bad "resolve: plan changed with irrelevant tree entry"
+
+mv resolve/good/libfoo.so.1 resolve/good/libfoo.hidden
+expect_exit 1 "falsify: unresolved consumer edge rejected" \
+  $RESOLVE resolve --host libc.so.6
+ln -s /etc/passwd resolve/good/libfoo.so.1
+expect_exit 1 "falsify: provider symlink escaping root rejected" \
+  $RESOLVE resolve --host libc.so.6
+rm resolve/good/libfoo.so.1
+mv resolve/good/libfoo.hidden resolve/good/libfoo.so.1
+
+# DT_RPATH is inherited, and its $ORIGIN belongs to the declaring object.
+printf 'extern int foo(void); int mid(void) { return foo(); }\n' > mid.c
+printf 'extern int mid(void); int main(void) { return mid() == 7 ? 0 : 1; }\n' > root.c
+$CC -shared -fPIC mid.c -Lresolve/good -Wl,-soname,libmid.so.1 \
+  -Wl,--no-as-needed -l:libfoo.so.1 -o resolve/good/libmid.so.1
+$CC root.c -Lresolve/good -Wl,--disable-new-dtags,-rpath,'$ORIGIN/../good' \
+  -Wl,--no-as-needed -l:libmid.so.1 -o resolve/bin/rpath-root
+$RESOLVE resolve --host libc.so.6 --entry /bin/rpath-root > resolve.inherited
+grep -q 'consumer=good/libmid.so.1 needed=libfoo.so.1 provider=good/libfoo.so.1 source=inherited-rpath' resolve.inherited \
+  && ok "resolve: inherited RPATH keeps declaring ORIGIN" \
+  || bad "resolve: inherited RPATH expanded against child"
+rm resolve/good/libmid.so.1 resolve/bin/rpath-root
+
+# Reachability is the prune law: an unreachable optional plugin with a missing
+# dependency does not poison the declared product closure, but scanning the
+# whole tree still exposes it.
+cp corpus/usefoo resolve/bad/dead-plugin
+expect_exit 1 "falsify: all-ELF scan sees unreachable broken plugin" \
+  $RESOLVE resolve --host libc.so.6
+$RESOLVE resolve --host libc.so.6 --entry /bin/use-foo > resolve.reachable
+grep -q 'consumer=bin/use-foo needed=libfoo.so.1 provider=good/libfoo.so.1' resolve.reachable \
+  && ok "resolve: entrypoint closure excludes unreachable plugin" \
+  || bad "resolve: entrypoint closure missing selected provider"
+expect_exit 1 "falsify: nonexistent entrypoint rejected" \
+  $RESOLVE resolve --host libc.so.6 --entry /bin/not-there
+printf 'extern int foo(void); int bar(void) { return foo(); }\n' > bar.c
+$CC -shared -fPIC bar.c -Lresolve/good -Wl,-rpath,'$ORIGIN' \
+  -Wl,--no-as-needed -l:libfoo.so.1 -o resolve/good/libbar.so.1
+$RESOLVE resolve --host libc.so.6 --entry-prefix /good > resolve.prefix
+grep -q 'consumer=good/libbar.so.1 needed=libfoo.so.1 provider=good/libfoo.so.1 source=runpath' resolve.prefix \
+  && ok "resolve: entry-prefix roots loadable shared objects" \
+  || bad "resolve: entry-prefix omitted shared object"
+expect_exit 1 "falsify: nonexistent entry-prefix rejected" \
+  $RESOLVE resolve --host libc.so.6 --entry-prefix /not-there
 
 # ── elf-graft: surgery + checked pre/postconditions ─────────────────────────
 LDSO=$(oracle_interp corpus/hello-dyn)
